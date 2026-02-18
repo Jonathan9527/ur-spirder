@@ -1,0 +1,10 @@
+[2026-02-18 12:09:03] redis_connect_error=[Errno 1] Operation not permitted
+[2026-02-18 12:09:03] telegram_sync_error=<urlopen error [Errno 8] nodename nor servname provided, or not known>
+[2026-02-18 12:09:03] id=20_2860 status=None body=URLError: <urlopen error [Errno 8] nodename nor servname provided, or not known>
+[2026-02-18 12:09:11] redis_connect_error=[Errno 1] Operation not permitted
+[2026-02-18 12:09:11] telegram_sync_error=<urlopen error [Errno 8] nodename nor servname provided, or not known>
+[2026-02-18 12:09:11] id=20_2860 status=None body=URLError: <urlopen error [Errno 8] nodename nor servname provided, or not known>
+[2026-02-18 12:10:35] redis_connected_without_password host=127.0.0.1 port=6379 db=0
+[2026-02-18 12:10:39] id=20_2860 团地=青戸第三 status=200 room_count=1 address=葛飾区青戸3-11 map=https://www.google.com/maps/search/?api=1&query=35.74655466789%2C139.8492806772625
+[2026-02-18 12:10:39] redis_saved key=ur:latest:20_2860
+[2026-02-18 12:10:39] 团地=青戸第三 room_baseline=- 1号棟413号室 | 96,400円 | 1LDK | 48&#13217; | 4階 | https://www.ur-net.go.jp/chintai/kanto/tokyo/20_2860_room.html?JKSS=000010413
