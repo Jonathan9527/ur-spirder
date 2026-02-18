@@ -340,6 +340,10 @@ def monitor_ids_redis_key(key_prefix: str) -> str:
     return f"{key_prefix}:monitor_ids"
 
 
+def monitor_ids_init_key(key_prefix: str) -> str:
+    return f"{key_prefix}:monitor_ids_initialized"
+
+
 def default_danchi_url(danchi_id: str) -> str:
     return f"https://www.ur-net.go.jp/chintai/kanto/tokyo/{danchi_id}.html"
 
@@ -420,8 +424,6 @@ def load_monitor_ids_file(path: str) -> set[str]:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         ids = {str(x) for x in data.get("ids", []) if str(x).strip()}
-        if not ids:
-            ids.add(DEFAULT_DANCHI_ID)
         return ids
     except Exception:
         return {DEFAULT_DANCHI_ID}
@@ -446,6 +448,15 @@ def load_monitor_ids(
     if redis_enabled:
         try:
             key = monitor_ids_redis_key(redis_key_prefix)
+            init_key = monitor_ids_init_key(redis_key_prefix)
+            init_exists = redis_command(
+                host=redis_host,
+                port=redis_port,
+                password=redis_password,
+                db=redis_db,
+                timeout=timeout,
+                command=["EXISTS", init_key],
+            )
             resp = redis_command(
                 host=redis_host,
                 port=redis_port,
@@ -455,7 +466,7 @@ def load_monitor_ids(
                 command=["SMEMBERS", key],
             )
             ids = {str(x).strip() for x in (resp or []) if str(x).strip()}
-            if not ids:
+            if int(init_exists or 0) == 0:
                 redis_command(
                     host=redis_host,
                     port=redis_port,
@@ -463,6 +474,14 @@ def load_monitor_ids(
                     db=redis_db,
                     timeout=timeout,
                     command=["SADD", key, DEFAULT_DANCHI_ID],
+                )
+                redis_command(
+                    host=redis_host,
+                    port=redis_port,
+                    password=redis_password,
+                    db=redis_db,
+                    timeout=timeout,
+                    command=["SET", init_key, "1"],
                 )
                 ids = {DEFAULT_DANCHI_ID}
             return ids
@@ -488,6 +507,7 @@ def add_monitor_id(
     monitor_ids.add(danchi_id)
     if redis_enabled:
         key = monitor_ids_redis_key(redis_key_prefix)
+        init_key = monitor_ids_init_key(redis_key_prefix)
         redis_command(
             host=redis_host,
             port=redis_port,
@@ -496,9 +516,50 @@ def add_monitor_id(
             timeout=timeout,
             command=["SADD", key, danchi_id],
         )
+        redis_command(
+            host=redis_host,
+            port=redis_port,
+            password=redis_password,
+            db=redis_db,
+            timeout=timeout,
+            command=["SET", init_key, "1"],
+        )
     else:
         save_monitor_ids_file(path, monitor_ids)
     return monitor_ids, added
+
+
+def clear_monitor_ids(
+    path: str,
+    redis_enabled: bool,
+    redis_host: str,
+    redis_port: int,
+    redis_password: str,
+    redis_db: int,
+    redis_key_prefix: str,
+    timeout: int,
+) -> None:
+    if redis_enabled:
+        key = monitor_ids_redis_key(redis_key_prefix)
+        init_key = monitor_ids_init_key(redis_key_prefix)
+        redis_command(
+            host=redis_host,
+            port=redis_port,
+            password=redis_password,
+            db=redis_db,
+            timeout=timeout,
+            command=["DEL", key],
+        )
+        redis_command(
+            host=redis_host,
+            port=redis_port,
+            password=redis_password,
+            db=redis_db,
+            timeout=timeout,
+            command=["SET", init_key, "1"],
+        )
+    else:
+        save_monitor_ids_file(path, set())
 
 
 def extract_danchi_id(text: str) -> str | None:
@@ -607,12 +668,32 @@ def handle_bot_command(
         send_telegram_message(token, chat_id, reply, timeout=timeout, parse_mode="HTML")
         return monitor_ids, pending_add
 
+    if msg.startswith("/clear"):
+        monitor_ids = set()
+        clear_monitor_ids(
+            path=monitor_path,
+            redis_enabled=redis_enabled,
+            redis_host=redis_host,
+            redis_port=redis_port,
+            redis_password=redis_password,
+            redis_db=redis_db,
+            redis_key_prefix=redis_key_prefix,
+            timeout=timeout,
+        )
+        pending_add.discard(chat_id)
+        send_telegram_message(token, chat_id, "已清空所有扫描任务", timeout=timeout)
+        return monitor_ids, pending_add
+
     if msg.startswith("/help") or msg.startswith("/start"):
         reply = (
-            "命令:\n"
+            "可用命令:\n"
+            "/help  显示命令帮助\n"
             "/add  添加监控（先进入等待链接模式）\n"
             "/add <ur链接或团地ID>  直接添加监控\n"
-            "/list  查看当前监控团地"
+            "/list  查看当前监控团地\n"
+            "/clear  清空所有扫描任务\n"
+            "示例:\n"
+            "/add https://www.ur-net.go.jp/chintai/kanto/tokyo/20_7200.html"
         )
         send_telegram_message(token, chat_id, reply, timeout=timeout)
         return monitor_ids, pending_add
