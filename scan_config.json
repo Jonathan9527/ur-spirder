@@ -3,13 +3,14 @@
     "interval_seconds": 60,
     "timeout_seconds": 20,
     "daily_start": "08:00",
-    "daily_end": "23:59"
+    "daily_end": "23:59",
+    "timezone": "Asia/Tokyo"
   },
   "telegram": {
     "enabled": true,
     "bot_token": "8596298112:AAH4d_B8F8_hJhk0h3o4MNXBuDem-hCj1HQ",
     "seed_chat_id": "8518577769",
-    "send_room_now": true,
+    "send_room_now": false,
     "webhook_enabled": true,
     "webhook_host": "0.0.0.0",
     "webhook_port": 8787,

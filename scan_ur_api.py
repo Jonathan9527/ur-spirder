@@ -15,6 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 URL = "https://chintai.r6.ur-net.go.jp/chintai/api/bukken/search/map_window/"
 DETAIL_BASE = "https://www.ur-net.go.jp"
@@ -29,6 +30,7 @@ DEFAULT_CONFIG = {
         "timeout_seconds": 20,
         "daily_start": "00:00",
         "daily_end": "23:59",
+        "timezone": "Asia/Tokyo",
     },
     "telegram": {
         "enabled": False,
@@ -53,7 +55,15 @@ DEFAULT_CONFIG = {
 
 
 def now_str() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(current_tz()).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def current_tz() -> ZoneInfo:
+    tz_name = os.getenv("APP_TIMEZONE", "Asia/Tokyo")
+    try:
+        return ZoneInfo(tz_name)
+    except Exception:
+        return ZoneInfo("Asia/Tokyo")
 
 
 def load_config(path: str) -> dict:
@@ -393,6 +403,37 @@ def get_danchi_meta_for_list(
     return extract_danchi_name_and_url(body, danchi_id)
 
 
+def get_latest_snapshot(
+    danchi_id: str,
+    timeout: int,
+    redis_enabled: bool,
+    redis_host: str,
+    redis_port: int,
+    redis_password: str,
+    redis_db: int,
+    redis_key_prefix: str,
+) -> dict | None:
+    if not redis_enabled:
+        return None
+    try:
+        key = f"{redis_key_prefix}:latest:{danchi_id}"
+        raw = redis_command(
+            host=redis_host,
+            port=redis_port,
+            password=redis_password,
+            db=redis_db,
+            timeout=timeout,
+            command=["GET", key],
+        )
+        if isinstance(raw, str) and raw:
+            obj = json.loads(raw)
+            if isinstance(obj, dict):
+                return obj
+    except Exception:
+        return None
+    return None
+
+
 def load_subscribers(path: str) -> tuple[int, set[str], set[str]]:
     if not os.path.exists(path):
         return 0, set(), set()
@@ -684,6 +725,31 @@ def handle_bot_command(
         send_telegram_message(token, chat_id, "已清空所有扫描任务", timeout=timeout)
         return monitor_ids, pending_add
 
+    if msg.startswith("/log"):
+        lines: list[str] = []
+        for mid in sorted(monitor_ids):
+            snap = get_latest_snapshot(
+                danchi_id=mid,
+                timeout=timeout,
+                redis_enabled=redis_enabled,
+                redis_host=redis_host,
+                redis_port=redis_port,
+                redis_password=redis_password,
+                redis_db=redis_db,
+                redis_key_prefix=redis_key_prefix,
+            )
+            if not snap:
+                lines.append(f"- {mid} | 暂无记录")
+                continue
+            name = str(snap.get("danchi_name", "")).strip() or mid
+            ts = str(snap.get("timestamp", "-")).strip() or "-"
+            rc = snap.get("room_count", "-")
+            st = snap.get("status", "-")
+            lines.append(f"- {name} | 请求时间: {ts} | 状态: {st} | 房源数: {rc}")
+        reply = "最近扫描结果:\n" + ("\n".join(lines) if lines else "(空)")
+        send_telegram_message(token, chat_id, reply, timeout=timeout)
+        return monitor_ids, pending_add
+
     if msg.startswith("/help") or msg.startswith("/start"):
         reply = (
             "可用命令:\n"
@@ -692,6 +758,7 @@ def handle_bot_command(
             "/add <ur链接或团地ID>  直接添加监控\n"
             "/list  查看当前监控团地\n"
             "/clear  清空所有扫描任务\n"
+            "/log  查看每个团地最后一次扫描结果\n"
             "示例:\n"
             "/add https://www.ur-net.go.jp/chintai/kanto/tokyo/20_7200.html"
         )
@@ -998,7 +1065,7 @@ async def run_async(
     last_room_count_by_id: dict[str, int] = {}
 
     while True:
-        now = datetime.now()
+        now = datetime.now(current_tz())
         if not in_active_window(now, daily_start, daily_end):
             wait_sec = seconds_until_window_start(now, daily_start, daily_end)
             sleep_sec = max(1, min(wait_sec, 60))
@@ -1170,6 +1237,7 @@ def main() -> None:
     timeout = int(args.timeout if args.timeout is not None else scanner_cfg.get("timeout_seconds", 20))
     daily_start = str(args.daily_start if args.daily_start is not None else scanner_cfg.get("daily_start", "00:00"))
     daily_end = str(args.daily_end if args.daily_end is not None else scanner_cfg.get("daily_end", "23:59"))
+    timezone_name = str(scanner_cfg.get("timezone", "Asia/Tokyo"))
 
     telegram_enabled = (
         bool(args.telegram)
@@ -1223,6 +1291,7 @@ def main() -> None:
         os.environ["REDIS_DB"] = str(redis_db)
     if redis_key_prefix and not os.getenv("REDIS_KEY_PREFIX"):
         os.environ["REDIS_KEY_PREFIX"] = redis_key_prefix
+    os.environ["APP_TIMEZONE"] = timezone_name
 
     if interval <= 0:
         raise SystemExit("--interval must be > 0")
